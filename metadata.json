@@ -1,0 +1,6 @@
+{
+  "name": "SaaS CRM Platform",
+  "description": "A robust, fully production-ready multi-tenant SaaS CRM platform compatible with cPanel and standard Node.js hosting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

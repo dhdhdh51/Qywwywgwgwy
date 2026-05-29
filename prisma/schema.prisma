@@ -1,0 +1,319 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // or "mysql" for cPanel native setups
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  STAFF
+  CUSTOMER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+}
+
+enum CampaignType {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum CampaignStatus {
+  DRAFT
+  SENT
+}
+
+model SubscriptionPlan {
+  id           String   @id @default(uuid())
+  name         String
+  price        Float
+  billingPeriod String  // "monthly" | "yearly"
+  features     String[]
+  maxLeads     Int
+  maxUsers     Int
+  maxStorageMb Int
+  isActive     Boolean  @default(true)
+  tenants      Tenant[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Tenant {
+  id                  String             @id @default(uuid())
+  name                String
+  subdomain           String             @unique
+  customDomain        String?            @unique
+  status              TenantStatus       @default(ACTIVE)
+  logoUrl             String?
+  primaryColor        String             @default("blue-600")
+  subscriptionExpiresAt DateTime
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  planId              String
+  plan                SubscriptionPlan   @relation(fields: [planId], references: [id])
+  
+  settings            Json               // Custom settings (businessType, currency, SMTP config, etc.)
+  
+  users               User[]
+  leads               CRMLead[]
+  contacts            CRMContact[]
+  tasks               CRMTask[]
+  invoices            CRMInvoice[]
+  expenses            CRMExpense[]
+  products            CRMProduct[]
+  tickets             SupportTicket[]
+  campaigns           MarketingCampaign[]
+  auditLogs           AuditLog[]
+
+  @@index([subdomain])
+  @@index([customDomain])
+}
+
+model User {
+  id          String    @id @default(uuid())
+  tenantId    String?   // Null for Super Admins
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id])
+  email       String    @unique
+  password    String    // Hash
+  name        String
+  role        UserRole  @default(STAFF)
+  status      String    @default("ACTIVE")
+  avatarUrl   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  assignedLeads CRMLead[] @relation("AssignedLeads")
+  assignedTasks CRMTask[] @relation("AssignedTasks")
+
+  @@index([tenantId])
+}
+
+model CRMLead {
+  id           String     @id @default(uuid())
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String
+  email        String
+  phone        String
+  company      String
+  status       LeadStatus @default(NEW)
+  value        Float      @default(0.0)
+  source       String     @default("Manual Input")
+  notes        String     @db.Text
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  assignedToId String?
+  assignedTo   User?      @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  tasks        CRMTask[]
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model CRMContact {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  email     String
+  phone     String
+  company   String
+  position  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+model CRMTask {
+  id           String       @id @default(uuid())
+  tenantId     String
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  title        String
+  description  String       @db.Text
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  dueDate      DateTime
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  assignedToId String?
+  assignedTo   User?        @relation("AssignedTasks", fields: [assignedToId], references: [id])
+  leadId       String?
+  lead         CRMLead?     @relation(fields: [leadId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model CRMInvoice {
+  id            String        @id @default(uuid())
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoiceNumber String
+  clientName    String
+  clientEmail   String
+  items         Json          // Array of {description, quantity, unitPrice}
+  total         Float
+  status        InvoiceStatus @default(DRAFT)
+  dueDate       DateTime
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([invoiceNumber])
+}
+
+model CRMExpense {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  description   String
+  amount        Float
+  category      String
+  date          DateTime
+  paymentMethod String
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+}
+
+model CRMProduct {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  sku         String
+  price       Float
+  stock       Int      @default(0)
+  description String   @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([sku])
+}
+
+model SupportTicket {
+  id           String         @id @default(uuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject      String
+  description  String         @db.Text
+  priority     TaskPriority   @default(MEDIUM)
+  status       String         @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  contactEmail String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model MarketingCampaign {
+  id        String         @id @default(uuid())
+  tenantId  String
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  subject   String
+  body      String         @db.Text
+  type      CampaignType   @default(EMAIL)
+  status    CampaignStatus @default(DRAFT)
+  sentCount Int            @default(0)
+  createdAt DateTime       @db.Timestamp
+
+  @@index([tenantId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
+  userId    String
+  userName  String
+  action    String
+  details   String   @db.Text
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([createdAt])
+}
+
+model Coupon {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  discountType  String   // PERCENT or FIXED
+  discountValue Float
+  expiresAt     DateTime
+  isActive      Boolean  @default(true)
+}
+
+model BlogCMS {
+  id        String   @id @default(uuid())
+  title     String
+  slug      String   @unique
+  content   String   @db.Text
+  excerpt   String
+  imageUrl  String
+  published Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model FaqCMS {
+  id       String @id @default(uuid())
+  question String
+  answer   String @db.Text
+}
+
+model TestimonialCMS {
+  id        String @id @default(uuid())
+  name      String
+  role      String
+  company   String
+  quote     String @db.Text
+  avatarUrl String
+}
